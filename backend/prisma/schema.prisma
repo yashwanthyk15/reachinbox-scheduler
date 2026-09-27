@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String            @id @default(cuid())
+  googleId       String            @unique
+  email          String            @unique
+  name           String
+  avatar         String?
+  createdAt      DateTime          @default(now())
+  emails         Email[]
+  emailBatches   EmailBatch[]
+  slackIntegration SlackIntegration?
+}
+
+model Sender {
+  id          String   @id @default(cuid())
+  name        String
+  email       String   @unique
+  host        String
+  port        Int
+  secure      Boolean  @default(false)
+  smtpUser    String
+  smtpPass    String
+  maxPerHour  Int
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  emails      Email[]
+}
+
+model Email {
+  id           String      @id @default(cuid())
+  batchId      String
+  userId       String
+  senderId     String
+  to           String
+  subject      String
+  body         String      @db.Text
+  scheduledAt  DateTime
+  delayMs      Int
+  status       EmailStatus @default(SCHEDULED)
+  sentAt       DateTime?
+  error         String?     @db.Text
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  batch        EmailBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  sender       Sender      @relation(fields: [senderId], references: [id])
+
+  @@index([userId, status, scheduledAt])
+  @@index([senderId, scheduledAt])
+}
+
+model SlackIntegration {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  teamId       String
+  teamName     String
+  botToken     String
+  slackUserId  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum EmailStatus {
+  SCHEDULED
+  SENDING
+  SENT
+  FAILED
+}
+
+model EmailBatch {
+  id             String   @id @default(cuid())
+  userId         String
+  idempotencyKey String
+  payloadHash    String
+  createdAt      DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emails         Email[]
+
+  @@unique([userId, idempotencyKey])
+}
