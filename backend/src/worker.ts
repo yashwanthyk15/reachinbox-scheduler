@@ -162,6 +162,7 @@ const worker = new Worker<SendEmailJob>(EMAIL_QUEUE_NAME, async (job, token) => 
   connection: redis,
   concurrency: config.WORKER_CONCURRENCY,
   lockDuration: 60_000,
+  drainDelay: 5,
 });
 
 async function recoverScheduledEmails(): Promise<void> {
