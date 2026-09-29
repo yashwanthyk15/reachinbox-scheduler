@@ -200,6 +200,25 @@ recoverScheduledEmails()
     process.exitCode = 1;
   });
 
+// Upstash serverless Redis does not support persistent pub/sub connections.
+// BullMQ relies on pub/sub to know when a delayed job is ready to be promoted
+// to the waiting queue. Without it, delayed jobs get stuck forever.
+// This interval manually promotes delayed jobs every 10 seconds.
+setInterval(async () => {
+  try {
+    const delayed = await emailQueue.getDelayed();
+    for (const job of delayed) {
+      const readyAt = job.timestamp + (job.delay ?? 0);
+      if (readyAt <= Date.now()) {
+        await job.promote();
+        console.log(`Promoted delayed job ${job.id}`);
+      }
+    }
+  } catch (error) {
+    console.error("Delayed job promotion check failed:", error);
+  }
+}, 10_000);
+
 async function shutdown(): Promise<void> {
   await worker.close();
   await emailQueue.close();
