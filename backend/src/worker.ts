@@ -123,11 +123,15 @@ const worker = new Worker<SendEmailJob>(EMAIL_QUEUE_NAME, async (job, token) => 
   }
   await redis.del(reservationKey);
 
+  console.log(`Processing email ${email.id} to ${email.to} via ${email.sender.host}:${email.sender.port}`);
   const transport = nodemailer.createTransport({
     host: email.sender.host,
     port: email.sender.port,
     secure: email.sender.secure,
     auth: { user: email.sender.smtpUser, pass: decryptSecret(email.sender.smtpPass) },
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 30_000,
   });
 
   try {
