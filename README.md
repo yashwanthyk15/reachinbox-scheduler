@@ -86,7 +86,7 @@ See `.env.example` for the complete template. Never commit real values.
 
 ### Delivery Semantics and Trade-offs
 
-PostgreSQL conditional claims prevent normal concurrent duplicate sends, and completed database rows are not automatically restarted. SMTP does not support a transaction shared with PostgreSQL: if a process dies after the SMTP server accepted a message but before the `SENT` update commits, the external outcome is unknowable. To avoid automatic duplicate delivery, that in-flight row remains `SENDING` and is visible for operator review rather than being blindly resent. This is the unavoidable boundary of exactly-once delivery over ordinary SMTP. A future production extension could add an explicit reconciliation action or use a provider with idempotency keys.
+PostgreSQL conditional claims prevent normal concurrent duplicate sends, and completed database rows are not automatically restarted. SMTP does not support a transaction shared with PostgreSQL: if a process dies after the SMTP server accepted a message but before the `SENT` update commits, the external outcome is unknowable. On worker startup, stale `SENDING` rows are marked `FAILED` for operator review rather than blindly resent. The known credential-decryption failure that occurs before SMTP transport creation is safe to retry. This is the unavoidable boundary of exactly-once delivery over ordinary SMTP. A future production extension could add an explicit reconciliation action or use a provider with idempotency keys.
 
 ## API
 

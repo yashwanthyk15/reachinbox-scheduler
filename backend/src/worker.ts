@@ -124,17 +124,17 @@ const worker = new Worker<SendEmailJob>(EMAIL_QUEUE_NAME, async (job, token) => 
   await redis.del(reservationKey);
 
   console.log(`Processing email ${email.id} to ${email.to} via ${email.sender.host}:${email.sender.port}`);
-  const transport = nodemailer.createTransport({
-    host: email.sender.host,
-    port: email.sender.port,
-    secure: email.sender.secure,
-    auth: { user: email.sender.smtpUser, pass: decryptSecret(email.sender.smtpPass) },
-    connectionTimeout: 15_000,
-    greetingTimeout: 15_000,
-    socketTimeout: 30_000,
-  });
-
+  let transport: ReturnType<typeof nodemailer.createTransport> | undefined;
   try {
+    transport = nodemailer.createTransport({
+      host: email.sender.host,
+      port: email.sender.port,
+      secure: email.sender.secure,
+      auth: { user: email.sender.smtpUser, pass: decryptSecret(email.sender.smtpPass) },
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 30_000,
+    });
     const info = await transport.sendMail({
       from: { name: config.EMAIL_FROM_NAME, address: email.sender.email },
       to: email.to,
@@ -160,7 +160,7 @@ const worker = new Worker<SendEmailJob>(EMAIL_QUEUE_NAME, async (job, token) => 
     if (lastAttempt) await safeIndex(email.id);
     throw error;
   } finally {
-    transport.close();
+    transport?.close();
   }
 }, {
   connection: redis,
@@ -194,10 +194,32 @@ async function recoverScheduledEmails(): Promise<void> {
   }
 }
 
+async function recoverStuckSendingEmails(): Promise<void> {
+  const staleBefore = new Date(Date.now() - 2 * 60_000);
+  const staleEmails = await prisma.email.findMany({
+    where: { status: "SENDING", updatedAt: { lt: staleBefore } },
+    select: { id: true },
+  });
+
+  for (const email of staleEmails) {
+    const job = await emailQueue.getJob(`email-${email.id}`);
+    if (job && await job.getState() === "active") continue;
+    const canRetry = job?.failedReason === "Unsupported state or unable to authenticate data";
+
+    await prisma.email.updateMany({
+      where: { id: email.id, status: "SENDING", updatedAt: { lt: staleBefore } },
+      data: canRetry
+        ? { status: "SCHEDULED", error: "Recovered a credential-decryption failure before SMTP send; retrying." }
+        : { status: "FAILED", error: "Worker stopped during send; delivery outcome is uncertain. Verify before retrying." },
+    });
+  }
+}
+
 worker.on("ready", () => console.log(`Email worker ready (concurrency ${config.WORKER_CONCURRENCY}).`));
 worker.on("failed", (job, error) => console.error(`Email job ${job?.id} failed:`, error.message));
 
-recoverScheduledEmails()
+recoverStuckSendingEmails()
+  .then(recoverScheduledEmails)
   .then(() => console.log("Scheduled email recovery scan complete."))
   .catch((error: unknown) => {
     console.error("Could not recover scheduled emails:", error);
